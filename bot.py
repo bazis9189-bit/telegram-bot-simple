@@ -1,25 +1,28 @@
 import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
-# ТВОЙ ТОКЕН (замени на свой!)
+# ТВОЙ ТОКЕН
 TOKEN = "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU"
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-async def start(update: Update, context):
-    await update.message.reply_text("✅ БОТ ЗАПУЩЕН И РАБОТАЕТ!")
+def start(update, context):
+    update.message.reply_text("✅ БОТ ЗАПУЩЕН И РАБОТАЕТ!")
 
-async def echo(update: Update, context):
-    await update.message.reply_text(f"Вы написали: {update.message.text}")
+def echo(update, context):
+    update.message.reply_text(f"Вы написали: {update.message.text}")
 
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
     
-    print("=== БОТ СТАРТУЕТ ===")
-    app.run_polling()
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
+    
+    logger.info("=== БОТ СТАРТУЕТ ===")
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
