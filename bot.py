@@ -1,5 +1,7 @@
+import asyncio
 import logging
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 # ТВОЙ ТОКЕН
 TOKEN = "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU"
@@ -7,22 +9,24 @@ TOKEN = "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def start(update, context):
-    update.message.reply_text("✅ БОТ ЗАПУЩЕН И РАБОТАЕТ!")
+async def start(update: Update, context):
+    await update.message.reply_text("✅ БОТ ЗАПУЩЕН И РАБОТАЕТ!")
 
-def echo(update, context):
-    update.message.reply_text(f"Вы написали: {update.message.text}")
+async def echo(update: Update, context):
+    await update.message.reply_text(f"Вы: {update.message.text}")
 
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+async def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
+    logger.info("=== БОТ ЗАПУЩЕН ===")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
     
-    logger.info("=== БОТ СТАРТУЕТ ===")
-    updater.start_polling()
-    updater.idle()
+    # Бесконечное ожидание
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
