@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import sqlite3
+import os
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ТВОЙ ТОКЕН
-TOKEN = "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU"
+# Получаем токен из переменных окружения (безопаснее)
+TOKEN = os.getenv("TOKEN", "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU")
 
 # Настройка логирования
 logging.basicConfig(
@@ -215,7 +216,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # Главная функция
-async def main():
+def main():
     # Инициализируем базу данных
     init_db()
     
@@ -233,13 +234,11 @@ async def main():
     
     # Запускаем бота
     logger.info("=== БОТ ДЛЯ СЧЕТОВ ЗАПУЩЕН ===")
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
+    logger.info(f"Токен: {TOKEN[:10]}...")
     
-    # Бесконечное ожидание
-    await asyncio.Event().wait()
+    # Запускаем polling
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 # Точка входа
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
