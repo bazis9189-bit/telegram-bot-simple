@@ -4,10 +4,11 @@ import sqlite3
 import os
 from datetime import datetime
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from google_sheets import init_google_sheets
 
-# Получаем токен из переменных окружения (безопаснее)
-TOKEN = os.getenv("TOKEN", "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU")
+# Токен бота
+TOKEN = "8397642444:AAHE9_BqSh8IPuqe5Ojmcyj-Q89okIHhykU"
 
 # Настройка логирования
 logging.basicConfig(
@@ -34,26 +35,30 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    logger.info("База данных инициализирована")
+    logger.info("✅ База данных SQLite инициализирована")
+
+# Инициализируем Google Sheets при старте
+from google_sheets import gs_manager
 
 # Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     text = (
         "📊 Бот для учета счетов\n\n"
         "Я помогу вам:\n"
         "• Добавлять счета\n"
         "• Вести учет\n"
-        "• Управлять поставщиками\n\n"
+        "• Управлять поставщиками\n"
+        "• Сохранять в Google Таблицу\n\n"
         "Доступные команды:\n"
         "/add - Добавить новый счет\n"
         "/list - Показать мои счета\n"
         "/help - Помощь\n\n"
         "Бот работает 24/7 на Render!"
     )
-    await update.message.reply_text(text)
+    update.message.reply_text(text)
 
-# Команда /add - показать инструкцию
-async def add_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Команда /add
+def add_invoice(update: Update, context: CallbackContext):
     text = (
         "📝 Добавление счета\n\n"
         "Отправьте данные в формате:\n"
@@ -63,15 +68,15 @@ async def add_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Для срочного счета добавьте ! в конце:\n"
         "СЧ-001 20.01.2024 ИП_Иванов 25000 Услуги !"
     )
-    await update.message.reply_text(text)
+    update.message.reply_text(text)
 
-# Команда /list - показать счета
-async def list_invoices(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Команда /list
+def list_invoices(update: Update, context: CallbackContext):
     try:
         conn = sqlite3.connect('invoices.db')
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, invoice_number, invoice_date, supplier, amount, priority, created_at
+            SELECT id, invoice_number, invoice_date, supplier, amount, purpose, priority, created_at
             FROM invoices 
             ORDER BY created_at DESC 
             LIMIT 10
@@ -80,17 +85,18 @@ async def list_invoices(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         
         if not invoices:
-            await update.message.reply_text("📭 Счетов пока нет\n\nДобавьте первый счет командой /add")
+            update.message.reply_text("📭 Счетов пока нет\n\nДобавьте первый счет командой /add")
             return
         
         response = "📋 Последние счета:\n\n"
         for inv in invoices:
-            priority_icon = "🚀" if inv[5] == 'urgent' else "⏳"
+            priority_icon = "🚀" if inv[6] == 'urgent' else "⏳"
             response += (
                 f"{priority_icon} #{inv[0]} {inv[1]}\n"
                 f"📅 {inv[2]} | 🏢 {inv[3]}\n"
                 f"💰 {inv[4]:,.2f} ₸\n"
-                f"🕒 {inv[6][:16]}\n"
+                f"📝 {inv[5] or 'Не указано'}\n"
+                f"🕒 {inv[7][:16]}\n"
                 f"────────────────────\n"
             )
         
@@ -108,14 +114,14 @@ async def list_invoices(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Добавить новый: /add"
         )
         
-        await update.message.reply_text(response)
+        update.message.reply_text(response)
         
     except Exception as e:
         logger.error(f"Ошибка в /list: {e}")
-        await update.message.reply_text("❌ Ошибка при получении счетов")
+        update.message.reply_text("❌ Ошибка при получении счетов")
 
 # Команда /help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def help_command(update: Update, context: CallbackContext):
     text = (
         "🆘 Помощь по боту\n\n"
         "Как добавить счет:\n"
@@ -131,13 +137,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list - Список счетов\n"
         "/help - Эта справка"
     )
-    await update.message.reply_text(text)
+    update.message.reply_text(text)
 
-# Обработка текстовых сообщений (добавление счетов)
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Обработка текстовых сообщений
+def handle_text(update: Update, context: CallbackContext):
     text = update.message.text.strip()
     
-    # Если сообщение похоже на счет (содержит цифры и не команда)
+    # Если сообщение похоже на счет
     if (len(text.split()) >= 3 and 
         not text.startswith('/') and
         any(char.isdigit() for char in text)):
@@ -159,7 +165,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             amount = float(parts[3].replace(',', '.'))
             purpose = ' '.join(parts[4:]) if len(parts) > 4 else ''
             
-            # Сохраняем в базу
+            # Сохраняем в SQLite
             conn = sqlite3.connect('invoices.db')
             cursor = conn.cursor()
             cursor.execute('''
@@ -171,6 +177,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             invoice_id = cursor.lastrowid
             conn.close()
             
+            # Сохраняем в Google Sheets
+            gs_success = False
+            if gs_manager:
+                invoice_data = {
+                    'number': invoice_number,
+                    'date': invoice_date,
+                    'supplier': supplier,
+                    'amount': amount,
+                    'purpose': purpose,
+                    'priority': priority
+                }
+                gs_success = gs_manager.add_invoice(invoice_data)
+            
             # Формируем ответ
             priority_text = "🚀 СРОЧНЫЙ" if priority == 'urgent' else "⏳ Обычный"
             
@@ -181,13 +200,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🏢 Поставщик: {supplier}\n"
                 f"💰 Сумма: {amount:,.2f} ₸\n"
                 f"📝 Назначение: {purpose or 'Не указано'}\n"
-                f"🎯 Приоритет: {priority_text}\n\n"
-                f"Для просмотра всех счетов: /list"
+                f"🎯 Приоритет: {priority_text}\n"
             )
-            await update.message.reply_text(response)
+            
+            if gs_success:
+                response += f"\n📊 Данные сохранены в Google Таблицу!"
+            else:
+                response += f"\n📝 Данные сохранены локально"
+            
+            response += f"\n\nДля просмотра всех счетов: /list"
+            
+            update.message.reply_text(response)
             
         except ValueError:
-            await update.message.reply_text(
+            update.message.reply_text(
                 "❌ Ошибка формата!\n\n"
                 "Правильный формат:\n"
                 "Номер Дата Поставщик Сумма [Назначение] [!]\n\n"
@@ -196,18 +222,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             logger.error(f"Ошибка добавления счета: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            update.message.reply_text(f"❌ Ошибка: {str(e)}")
     
     # Простые ответы
     elif 'привет' in text.lower():
-        await update.message.reply_text("Привет! 👋 Для работы со счетами используйте /add")
+        update.message.reply_text("Привет! 👋 Для работы со счетами используйте /add")
     elif 'спасибо' in text.lower():
-        await update.message.reply_text("Всегда рад помочь! 😊")
+        update.message.reply_text("Всегда рад помочь! 😊")
     elif 'бот' in text.lower():
-        await update.message.reply_text("Я здесь! Чем могу помочь?")
+        update.message.reply_text("Я здесь! Чем могу помочь?")
     else:
-        # Если не распознано как счет
-        await update.message.reply_text(
+        update.message.reply_text(
             "Используйте команды:\n"
             "/start - начало работы\n"
             "/add - добавить счет\n" 
@@ -220,25 +245,27 @@ def main():
     # Инициализируем базу данных
     init_db()
     
-    # Создаем Application
-    application = Application.builder().token(TOKEN).build()
+    # Инициализируем Google Sheets
+    if init_google_sheets():
+        logger.info("✅ Google Sheets интеграция включена")
+    else:
+        logger.info("⚠️ Google Sheets интеграция отключена")
     
-    # Добавляем обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("add", add_invoice))
-    application.add_handler(CommandHandler("list", list_invoices))
-    application.add_handler(CommandHandler("help", help_command))
+    # Создаем Updater
+    updater = Updater(TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
     
-    # Добавляем обработчик текстовых сообщений
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    # Добавляем обработчики
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("add", add_invoice))
+    dispatcher.add_handler(CommandHandler("list", list_invoices))
+    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
     
     # Запускаем бота
     logger.info("=== БОТ ДЛЯ СЧЕТОВ ЗАПУЩЕН ===")
-    logger.info(f"Токен: {TOKEN[:10]}...")
-    
-    # Запускаем polling
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    updater.start_polling()
+    updater.idle()
 
-# Точка входа
 if __name__ == "__main__":
     main()
